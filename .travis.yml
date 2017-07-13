@@ -6,22 +6,16 @@ matrix:
     fast_finish: true
     include:
         - os: linux
-          node_js: 4
-          env: CXX=g++-4.8
-        - os: linux
           node_js: 6
           env: CXX=g++-4.8
         - os: linux
           node_js: 7
           env: CXX=g++-4.8
         - os: osx
-          node_js: 4
-    allow_failures:
-        - os: osx
-          node_js: 4
+          node_js: 6
 env:
     global:
-        - COZY_DESKTOP_DIR=tmp
+        - COZY_DESKTOP_DIR=/tmp/cozy-desktop
         - COZY_URL="http://localhost:8080"
         - COZY_PASSPHRASE="CozyTest_1"
         - NODE_ENV=test
@@ -30,7 +24,6 @@ services:
     - docker
 cache:
     directories:
-        - node_modules
         - /Library/Caches/Homebrew
 addons:
     apt:
@@ -43,13 +36,30 @@ addons:
 # install cozy stack for integration test
 before_install:
     # CouchDB 2
-    - docker run -d -p 5984:5984 --name couch klaemo/couchdb:2.0.0
+    - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+        travis_retry docker run -d -p 5984:5984 --name couch klaemo/couchdb:2.0.0;
+      fi
+    - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+        travis_retry brew cask install apache-couchdb;
+        (/Applications/Apache\ CouchDB.app/Contents/Resources/couchdbx-core/bin/couchdb &);
+      fi
 
-    # Go 1.7
-    - gimme 1.7
+    # Go 1.7 (already by default on macOS)
+    - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+        travis_retry gimme 1.7;
+      fi
+    - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
+        export GOPATH="$HOME";
+        export PATH="$GOPATH/bin:$PATH";
+      fi
+
+    # Yarn
+    - curl -o- -L https://yarnpkg.com/install.sh | bash -s -- --version 0.24.6;
+    - export PATH=$HOME/.yarn/bin:$PATH;
+
 
     # Cozy stack v3
-    - go get -u github.com/cozy/cozy-stack
+    - travis_retry go get -u github.com/cozy/cozy-stack
     - curl -X PUT http://127.0.0.1:5984/{_users,_replicator,_global_changes}
     - $GOPATH/bin/cozy-stack serve &
     - sleep 1
@@ -57,18 +67,21 @@ before_install:
     - export COZY_CLIENT_ID=$($GOPATH/bin/cozy-stack instances client-oauth localhost:8080 http://localhost/ test github.com/cozy-labs/cozy-desktop)
     - export COZY_STACK_TOKEN=$($GOPATH/bin/cozy-stack instances token-oauth localhost:8080 "$COZY_CLIENT_ID" io.cozy.files)
 
-    # Cozy desktop tmp dir
-    - cd $HOME/build/cozy-labs/cozy-desktop
-    - pwd
-    - mkdir /tmp/cozy-desktop
-    - ln -s /tmp/cozy-desktop tmp
+    # COZY_DESKTOP_DIR
+    - mkdir -p "$COZY_DESKTOP_DIR"
+
+    # Dummy .env.test (all variables are already set)
+    # env-cmd ignores the file when empty
+    - echo "NODE_ENV=test" > "${TRAVIS_BUILD_DIR}/cli/.env.test"
 
 script:
+    - cd cli
+    - travis_retry yarn
     - yarn build
     - yarn lint
-    - yarn test-unit-coverage
-    - cd gui
-    - yarn
+    - yarn test:coverage
+    - cd ../gui
+    - travis_retry yarn
     - yarn lint
     - yarn build
     - cd ..
@@ -79,3 +92,4 @@ after_success:
 after_failure:
     - $CXX --version
     - netstat -lntp
+    - ls -alR cli/node_modules/pouchdb/node_modules/leveldown

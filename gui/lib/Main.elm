@@ -7,7 +7,6 @@ import Time exposing (Time)
 import Helpers exposing (Locale)
 import Wizard
 import Address
-import Password
 import Folder
 import TwoPanes
 import Dashboard
@@ -15,6 +14,7 @@ import Settings
 import Account
 import Help
 import Unlinked
+import Revoked
 
 
 main =
@@ -34,6 +34,7 @@ type Page
     = WizardPage
     | TwoPanesPage
     | UnlinkedPage
+    | RevokedPage
 
 
 type alias Model =
@@ -42,6 +43,7 @@ type alias Model =
     , page : Page
     , wizard : Wizard.Model
     , twopanes : TwoPanes.Model
+    , revoked : Revoked.Model
     }
 
 
@@ -49,6 +51,7 @@ type alias Flags =
     { folder : String
     , locale : String
     , locales : Json.Value
+    , platform : String
     , version : String
     }
 
@@ -73,13 +76,16 @@ init flags =
             WizardPage
 
         wizard =
-            Wizard.init flags.folder
+            Wizard.init flags.folder flags.platform
 
         twopanes =
             TwoPanes.init flags.version
 
+        revoked =
+            Revoked.init
+
         model =
-            Model localeIdentifier locales page wizard twopanes
+            Model localeIdentifier locales page wizard twopanes revoked
     in
         ( model, Cmd.none )
 
@@ -94,6 +100,8 @@ type Msg
     | SyncStart ( String, String )
     | TwoPanesMsg TwoPanes.Msg
     | Unlink
+    | Revoked
+    | RevokedMsg Revoked.Msg
     | Restart
 
 
@@ -127,8 +135,18 @@ update msg model =
         Unlink ->
             ( { model | page = UnlinkedPage }, Cmd.none )
 
+        Revoked ->
+            ( { model | page = RevokedPage }, Cmd.none )
+
         Restart ->
             ( model, restart True )
+
+        RevokedMsg subMsg ->
+            let
+                ( revoked, cmd ) =
+                    Revoked.update subMsg model.revoked
+            in
+                ( { model | revoked = revoked }, Cmd.map RevokedMsg cmd )
 
         NoOp ->
             ( model, Cmd.none )
@@ -138,10 +156,10 @@ update msg model =
 -- SUBSCRIPTIONS
 
 
-port pong : (Maybe String -> msg) -> Sub msg
+port registrationError : (String -> msg) -> Sub msg
 
 
-port registration : (Maybe String -> msg) -> Sub msg
+port registrationDone : (Bool -> msg) -> Sub msg
 
 
 port folderError : (String -> msg) -> Sub msg
@@ -163,6 +181,9 @@ port offline : (Bool -> msg) -> Sub msg
 
 
 port updated : (Bool -> msg) -> Sub msg
+
+
+port syncing : (Bool -> msg) -> Sub msg
 
 
 port transfer : (Dashboard.File -> msg) -> Sub msg
@@ -187,14 +208,20 @@ port mail : (Maybe String -> msg) -> Sub msg
 -- https://github.com/elm-lang/elm-compiler/issues/1367
 
 
+port cancelUnlink : (Bool -> msg) -> Sub msg
+
+
 port unlink : (Bool -> msg) -> Sub msg
+
+
+port revoked : (Bool -> msg) -> Sub msg
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ pong (WizardMsg << Wizard.AddressMsg << Address.Pong)
-        , registration (WizardMsg << Wizard.PasswordMsg << Password.Registered)
+        [ registrationError (WizardMsg << Wizard.AddressMsg << Address.RegistrationError)
+        , registrationDone (always (WizardMsg Wizard.RegistrationDone))
         , folderError (WizardMsg << Wizard.FolderMsg << Folder.SetError)
         , folder (WizardMsg << Wizard.FolderMsg << Folder.FillFolder)
         , synchonization SyncStart
@@ -207,9 +234,12 @@ subscriptions model =
         , syncError (TwoPanesMsg << TwoPanes.DashboardMsg << Dashboard.SetError)
         , offline (always (TwoPanesMsg (TwoPanes.DashboardMsg Dashboard.GoOffline)))
         , updated (always (TwoPanesMsg (TwoPanes.DashboardMsg Dashboard.Updated)))
+        , syncing (always (TwoPanesMsg (TwoPanes.DashboardMsg Dashboard.Syncing)))
         , mail (TwoPanesMsg << TwoPanes.HelpMsg << Help.MailSent)
         , autolaunch (TwoPanesMsg << TwoPanes.SettingsMsg << Settings.AutoLaunchSet)
+        , cancelUnlink (always (TwoPanesMsg (TwoPanes.AccountMsg Account.CancelUnlink)))
         , unlink (always Unlink)
+        , revoked (always Revoked)
         ]
 
 
@@ -244,3 +274,6 @@ view model =
 
             UnlinkedPage ->
                 Html.map (\_ -> Restart) (Unlinked.view helpers)
+
+            RevokedPage ->
+                Html.map RevokedMsg (Revoked.view helpers model.revoked)

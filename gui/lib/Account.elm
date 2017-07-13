@@ -11,9 +11,7 @@ import Helpers exposing (Helpers)
 
 type alias DiskSpace =
     { used : Float
-    , usedUnit : String
-    , total : Float
-    , totalUnit : String
+    , quota : Float
     }
 
 
@@ -31,9 +29,7 @@ init =
     , deviceName = ""
     , disk =
         { used = 0
-        , usedUnit = ""
-        , total = 0
-        , totalUnit = ""
+        , quota = 0
         }
     , busy = False
     }
@@ -47,6 +43,7 @@ type Msg
     = FillAddressAndDevice ( String, String )
     | UpdateDiskSpace DiskSpace
     | UnlinkCozy
+    | CancelUnlink
 
 
 port unlinkCozy : () -> Cmd msg
@@ -66,6 +63,9 @@ update msg model =
         UnlinkCozy ->
             ( { model | busy = True }, unlinkCozy () )
 
+        CancelUnlink ->
+            ( { model | busy = False }, Cmd.none )
+
 
 
 -- VIEW
@@ -84,9 +84,9 @@ view helpers model =
                     , class "disk-space__icon"
                     ]
                     []
-                , text (toString (model.disk.used) ++ " " ++ model.disk.usedUnit ++ diskUnit)
+                , text (toString (round (model.disk.used / 1000000)) ++ " M" ++ diskUnit)
                 , text " / "
-                , text (toString (model.disk.total) ++ " " ++ model.disk.totalUnit ++ diskUnit)
+                , text (toString (round (model.disk.quota / 1000000)) ++ " M" ++ diskUnit)
                 ]
     in
         section [ class "two-panes__content two-panes__content--account" ]
